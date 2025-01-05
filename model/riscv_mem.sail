@@ -63,6 +63,24 @@ function write_kind_of_flags (aq : bool, rl : bool, con : bool) -> write_kind =
     (true,  false, true)  => throw(Error_not_implemented("sc.aq"))
   }
 
+val check_endianess: unit -> bool
+function check_endianess() = {
+  if (xlen == 32) then {
+    match cur_privilege {
+      Machine     => bits_to_bool(mstatush[MBE]),
+      Supervisor  => bits_to_bool(mstatush[SBE]),
+      User        => bits_to_bool(mstatus[UBE]),
+    }
+  }
+  else {
+    match cur_privilege {
+      Machine     => bits_to_bool(mstatus.bits[37 .. 37]),
+      Supervisor  => bits_to_bool(mstatus.bits[36 .. 36]),
+      User        => bits_to_bool(mstatus[UBE]),
+    }
+  }
+}
+
 // only used for actual memory regions, to avoid MMIO effects
 function phys_mem_read forall 'n, 0 < 'n <= max_mem_access . (t : AccessType(ext_access_type), paddr : physaddr, width : int('n), aq : bool, rl: bool, res : bool, meta : bool) -> MemoryOpResult((bits(8 * 'n), mem_meta)) = {
   let result = (match read_kind_of_flags(aq, rl, res) {
@@ -73,10 +91,16 @@ function phys_mem_read forall 'n, 0 < 'n <= max_mem_access . (t : AccessType(ext
     (Execute(),  None()) => MemException(E_Fetch_Access_Fault()),
     (Read(Data), None()) => MemException(E_Load_Access_Fault()),
     (_,          None()) => MemException(E_SAMO_Access_Fault()),
-    (_,      Some(v, m)) => { if   get_config_print_mem()
-                              then print_mem("mem[" ^ to_str(t) ^ "," ^ BitStr(physaddr_bits(paddr)) ^ "] -> " ^ BitStr(v));
-                              MemValue(v, m) }
-  }
+    (_,      Some(v, m)) => {
+                            let temp_var: bits('n * 8) = match (t, check_endianess()) {
+                                (Execute(), _) => (v),
+                                (_, true)      => reverse_endianness(v),
+                                (_, false)     => (v),
+                            };
+                        if   get_config_print_mem()
+                        then print_mem("mem[" ^ to_str(t) ^ "," ^ BitStr(physaddr_bits(paddr)) ^ "] -> " ^ BitStr(temp_var));
+                        MemValue(temp_var, m) }
+}
 }
 
 // Check if access is permitted according to PMPs and PMAs.
@@ -196,9 +220,13 @@ $endif
 
 // only used for actual memory regions, to avoid MMIO effects
 function phys_mem_write forall 'n, 0 < 'n <= max_mem_access . (wk : write_kind, paddr : physaddr, width : int('n), data : bits(8 * 'n), meta : mem_meta) -> MemoryOpResult(bool) = {
-  let result = MemValue(write_ram(wk, paddr, width, data, meta));
+  let temp_var: bits('n * 8) = match (check_endianess()) {
+      false => data,
+      true => reverse_endianness(data),
+  };
+  let result = MemValue(write_ram(wk, paddr, width, temp_var, meta));
   if   get_config_print_mem()
-  then print_mem("mem[" ^ BitStr(physaddr_bits(paddr)) ^ "] <- " ^ BitStr(data));
+  then print_mem("mem[" ^ BitStr(physaddr_bits(paddr)) ^ "] <- " ^ BitStr(temp_var));
   result
 }
 

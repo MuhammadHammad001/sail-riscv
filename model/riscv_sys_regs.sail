@@ -199,6 +199,7 @@ bitfield Mstatus : xlenbits = {
   SPP  : 8,
 
   MPIE : 7,
+  UBE  : 6,
   SPIE : 5,
 
   MIE  : 3,
@@ -241,6 +242,23 @@ function set_mstatus_UXL(m : Mstatus, a : arch_xlen) -> Mstatus = {
   }
 }
 
+function set_mstatus_MBE_SBE(m : Mstatus, a : bits(2)) -> Mstatus = {
+  if (xlen == 64) then {
+    let m = vector_update_subrange(m.bits, 37, 36,  a);
+    Mk_Mstatus(m)
+  } else { m }
+}
+
+function legalize_mstatush(o : Mstatush, v : xlenbits) -> Mstatush = {
+  if (xlen == 32) then {
+    let mh : Mstatush = Mk_Mstatush(zero_extend(v[5 .. 4] @ 0x0));
+    mh
+  }
+  else{
+    o
+  }
+}
+
 function legalize_mstatus(o : Mstatus, v : xlenbits) -> Mstatus = {
   /*
    * Populate all defined fields using the bits of v, stripping anything
@@ -249,7 +267,7 @@ function legalize_mstatus(o : Mstatus, v : xlenbits) -> Mstatus = {
    */
   // TODO: This method is error prone. We should instead explicitly copy the
   // fields that are implemented. See legalize_mie() for an example.
-  let m : Mstatus = Mk_Mstatus(zero_extend(v[22 .. 7] @ 0b0 @ v[5 .. 5] @ 0b0 @ v[3 .. 3] @ 0b0 @ v[1 .. 1] @ 0b0));
+  let m : Mstatus = Mk_Mstatus(zero_extend(v[22 .. 7] @ v[6 .. 5] @ 0b0 @ v[3 .. 3] @ 0b0 @ v[1 .. 1] @ 0b0));
 
   /* FS is WARL, and making FS writable can support the M-mode emulation of an FPU
    * to support code running in S/U-modes.  Spike does this, and for now, we match it,
@@ -276,13 +294,13 @@ function legalize_mstatus(o : Mstatus, v : xlenbits) -> Mstatus = {
   let m = set_mstatus_SXL(m, get_mstatus_SXL(o));
   let m = set_mstatus_UXL(m, get_mstatus_UXL(o));
 
-  /* We don't currently support changing MBE and SBE. */
   if xlen == 64 then {
-    Mk_Mstatus([m.bits with 37 .. 36 = 0b00])
+    set_mstatus_MBE_SBE(m, v[37 .. 36]);
   } else m
 }
 
 mapping clause csr_name_map = 0x300  <-> "mstatus"
+mapping clause csr_name_map = 0x310  <-> "mstatush"
 
 function clause is_CSR_defined(0x300) = true // mstatus
 function clause is_CSR_defined(0x310) = xlen == 32 // mstatush
@@ -291,7 +309,7 @@ function clause read_CSR(0x300) = mstatus.bits
 function clause read_CSR(0x310 if xlen == 32) = mstatush.bits
 
 function clause write_CSR(0x300, value) = { mstatus = legalize_mstatus(mstatus, value); mstatus.bits }
-function clause write_CSR((0x310, value) if xlen == 32) = { mstatush.bits } // ignore writes for now
+function clause write_CSR((0x310, value) if xlen == 32) = { mstatush = legalize_mstatush(mstatush, value); mstatush.bits }
 
 /* architecture and extension checks */
 

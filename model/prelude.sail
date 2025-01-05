@@ -18,6 +18,8 @@ $include <generic_equality.sail>
 $include <hex_bits.sail>
 $include <hex_bits_signed.sail>
 
+val reverse_endianness = pure {c: " reverse_endianness"} : forall 'n . (bits('n * 8)) -> bits('n * 8)
+
 val not_bit : bit -> bit
 function not_bit(b) = if b == bitone then bitzero else bitone
 
